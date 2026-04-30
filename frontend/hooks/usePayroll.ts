@@ -45,9 +45,9 @@ export interface TokenBalance {
 // Default tokens to monitor (XLM and USDC)
 const USDC_ISSUER = import.meta.env.PUBLIC_USDC_ISSUER || "";
 
-const DEFAULT_TOKENS: Array<{ token: string; tokenSymbol: string }> = [
-  { token: "", tokenSymbol: "XLM" },
-  { token: USDC_ISSUER, tokenSymbol: "USDC" },
+const DEFAULT_TOKENS: Array<{ token: string; tokenSymbol: string; monthlyBurnRate: bigint }> = [
+  { token: "", tokenSymbol: "XLM", monthlyBurnRate: 0n },
+  { token: USDC_ISSUER, tokenSymbol: "USDC", monthlyBurnRate: 0n },
 ];
 
 // Cache configuration: 30 seconds stale time, 5 minutes cache
@@ -216,5 +216,26 @@ export const usePayrollQueryClient = () => {
     invalidateVaultData,
     invalidateStreams,
     invalidateAll,
+  };
+};
+
+/**
+ * Combined hook for employer payroll dashboard.
+ * Aggregates vault balances and streams data with unified loading/error states.
+ *
+ * @param employerAddress - Stellar account ID of the employer
+ * @returns Combined payroll data with loading state and refresh function
+ */
+export const usePayroll = (employerAddress: string | undefined) => {
+  const vaultQuery = useVaultData(employerAddress);
+  const streamsQuery = useStreams(employerAddress);
+  const { invalidateAll } = usePayrollQueryClient();
+
+  return {
+    streams: streamsQuery.data || [],
+    treasuryBalances: vaultQuery.data || [],
+    isLoading: vaultQuery.isLoading || streamsQuery.isLoading,
+    error: vaultQuery.error || streamsQuery.error,
+    refreshData: invalidateAll,
   };
 };
