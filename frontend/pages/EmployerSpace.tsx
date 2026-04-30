@@ -66,7 +66,7 @@ export default function EmployerSpace() {
       const signedXdr = typeof signResult === "string" ? signResult : signResult.signedTxXdr;
       const txHash = await submitAndAwaitTx(signedXdr);
 
-      setSuccess(`Deposit successful! Transaction: ${txHash.slice(0, 16)}...`);
+      setSuccess(`Deposit successful! Transaction: ${txHash}`);
       setDepositAmount("");
       setTimeout(() => refreshData(), 2000);
     } catch (err) {
@@ -125,8 +125,28 @@ export default function EmployerSpace() {
         )}
         {error && <ErrorMessage error={error.message || String(error)} />}
         {success && (
-          <div className="p-4 bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 rounded-lg text-[var(--accent-teal)]">
-            {success}
+          <div className="p-4 bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 rounded-lg">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-[var(--accent-teal)] flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-[var(--accent-teal)] font-medium mb-2">Deposit successful!</p>
+                {success.includes('Transaction:') && (
+                  <a
+                    href={`https://stellar.expert/explorer/testnet/tx/${success.split('Transaction: ')[1]}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-sm text-[var(--accent-blue)] hover:text-[var(--accent-blue-light)] underline"
+                  >
+                    View transaction on Stellar Expert
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
