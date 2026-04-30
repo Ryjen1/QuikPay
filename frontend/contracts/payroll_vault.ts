@@ -131,6 +131,10 @@ export async function buildDepositTx(
   const server = getRpcServer();
   const account = await server.getAccount(fromAddress);
 
+  // Convert stroops to XLM (divide by 10^7)
+  // Stellar SDK expects amount as XLM string, not stroops
+  const amountInXLM = (Number(amount) / 1e7).toFixed(7);
+
   // Single classic payment operation only
   // (Soroban prepareTransaction only allows one op per tx)
   const tx = new TransactionBuilder(account, {
@@ -141,7 +145,7 @@ export async function buildDepositTx(
       Operation.payment({
         destination: VAULT_ACCOUNT, // G... vault address
         asset: Asset.native(),
-        amount: amount.toString(),
+        amount: amountInXLM, // Must be XLM as decimal string
         source: fromAddress,
       }),
     )
