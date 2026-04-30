@@ -12,6 +12,7 @@
  * • getVaultAvailableBalance    – reads available balance (balance - liability)
  * • getVaultData                – reads complete vault data for a token
  * • getAllVaultData             – reads vault data for all configured tokens
+ * • getActualVaultBalance       – reads actual account balance from Horizon (NEW)
  */
 
 import {
@@ -23,8 +24,9 @@ import {
   Address,
   Operation,
   Asset,
+  Horizon,
 } from "@stellar/stellar-sdk";
-import { rpcUrl, networkPassphrase } from "./util";
+import { rpcUrl, networkPassphrase, horizonUrl } from "./util";
 
 export const VAULT_ACCOUNT = (
   import.meta.env.VITE_VAULT_ACCOUNT as string | undefined
@@ -63,6 +65,10 @@ export interface TokenVaultData {
 
 function getRpcServer(): SorobanRpc.Server {
   return new SorobanRpc.Server(rpcUrl, { allowHttp: true });
+}
+
+function getHorizonServer(): Horizon.Server {
+  return new Horizon.Server(horizonUrl);
 }
 
 /**
@@ -156,6 +162,41 @@ export async function buildDepositTx(
   return { preparedXdr: tx.toXDR() };
 }
 
+// ─── getActualVaultBalance ──────────────────────────────────────────────────
+
+/**
+ * Gets the actual XLM balance of the vault account from Horizon.
+ * This is a workaround until the backend service updates the contract.
+ * 
+ * @returns Balance in stroops (1 XLM = 10^7 stroops)
+ */
+export async function getActualVaultBalance(): Promise<bigint> {
+  if (!VAULT_ACCOUNT) {
+    return 0n;
+  }
+
+  try {
+    const server = getHorizonServer();
+    const account = await server.loadAccount(VAULT_ACCOUNT);
+    
+    // Find XLM balance
+    const xlmBalance = account.balances.find(
+      (b) => b.asset_type === "native"
+    );
+    
+    if (!xlmBalance || xlmBalance.asset_type !== "native") {
+      return 0n;
+    }
+    
+    // Convert XLM to stroops
+    const balanceInStroops = BigInt(Math.floor(parseFloat(xlmBalance.balance) * 1e7));
+    return balanceInStroops;
+  } catch (error) {
+    console.error("Error fetching vault balance from Horizon:", error);
+    return 0n;
+  }
+}
+
 // ─── getVaultBalance ─────────────────────────────────────────────────────────
 
 /**
@@ -174,14 +215,14 @@ export async function getVaultBalance(token: string): Promise<bigint | null> {
     contract.call("get_balance", tokenToScVal(token)),
   );
 
-  return balance ?? null;
+  return balance;
 }
 
 // ─── getVaultLiability ───────────────────────────────────────────────────────
 
 /**
- * Calls `get_liability` on the PayrollVault contract to get the total
- * liability (amount committed to streams) for a specific token.
+ * Calls `get_liability` on the PayrollVault contract to get the total liability
+ * (amount committed to active streams) for a specific token.
  *
  * @param token Token contract address (or empty string for XLM)
  * @returns Liability in stroops, or null if error
@@ -195,14 +236,13 @@ export async function getVaultLiability(token: string): Promise<bigint | null> {
     contract.call("get_liability", tokenToScVal(token)),
   );
 
-  return liability ?? null;
+  return liability;
 }
 
 // ─── getVaultAvailableBalance ────────────────────────────────────────────────
 
 /**
- * Calls `get_available_balance` on the PayrollVault contract to get the
- * available balance (balance - liability) for a specific token.
+ * Calculates available balance (balance - liability) for a token.
  *
  * @param token Token contract address (or empty string for XLM)
  * @returns Available balance in stroops, or null if error
@@ -210,56 +250,39 @@ export async function getVaultLiability(token: string): Promise<bigint | null> {
 export async function getVaultAvailableBalance(
   token: string,
 ): Promise<bigint | null> {
-  if (!PAYROLL_VAULT_CONTRACT_ID) return null;
+  const balance = await getVaultBalance(token);
+  const liability = await getVaultLiability(token);
 
-  const contract = new Contract(PAYROLL_VAULT_CONTRACT_ID);
-  const available = await simulateContractRead<bigint>(
-    PAYROLL_VAULT_CONTRACT_ID,
-    contract.call("get_available_balance", tokenToScVal(token)),
-  );
+  if (balance === null || liability === null) return null;
 
-  return available ?? null;
+  return balance - liability;
 }
 
 // ─── getVaultData ────────────────────────────────────────────────────────────
 
 /**
- * Fetches complete vault data for a specific token including balance,
- * liability, available balance, and runway calculation.
+ * Fetches complete vault data for a single token.
  *
  * @param token Token contract address (or empty string for XLM)
- * @param tokenSymbol Human-readable token symbol (e.g., "XLM", "USDC")
+ * @param tokenSymbol Human-readable token symbol
  * @param monthlyBurnRate Estimated monthly burn rate in stroops
- * @returns Complete vault data, or null if error
+ * @returns Complete vault data or null if error
  */
 export async function getVaultData(
   token: string,
   tokenSymbol: string,
-  monthlyBurnRate: bigint = BigInt(0),
+  monthlyBurnRate: bigint,
 ): Promise<TokenVaultData | null> {
-  if (!PAYROLL_VAULT_CONTRACT_ID) return null;
+  const balance = await getVaultBalance(token);
+  const liability = await getVaultLiability(token);
 
-  const [balance, liability, available] = await Promise.all([
-    getVaultBalance(token),
-    getVaultLiability(token),
-    getVaultAvailableBalance(token),
-  ]);
+  if (balance === null || liability === null) return null;
 
-  if (balance === null || liability === null || available === null) {
-    return null;
-  }
-
-  // Calculate runway in days
-  let runwayDays = 0;
-  if (monthlyBurnRate > BigInt(0)) {
-    const dailyBurnRate = monthlyBurnRate / BigInt(30);
-    if (dailyBurnRate > BigInt(0)) {
-      runwayDays = Number(available / dailyBurnRate);
-    }
-  } else if (available > BigInt(0)) {
-    // If no burn rate, show infinity (use large number)
-    runwayDays = 9999;
-  }
+  const available = balance - liability;
+  const runwayDays =
+    monthlyBurnRate > 0n
+      ? Number(available / (monthlyBurnRate / 30n))
+      : Infinity;
 
   return {
     token,
@@ -275,9 +298,10 @@ export async function getVaultData(
 // ─── getAllVaultData ─────────────────────────────────────────────────────────
 
 /**
- * Fetches vault data for all configured tokens (XLM and USDC by default).
+ * Fetches vault data for multiple tokens.
+ * WORKAROUND: For XLM, reads actual balance from Horizon instead of contract.
  *
- * @param tokens Array of { token: string, tokenSymbol: string, monthlyBurnRate: bigint }
+ * @param tokens Array of token configurations
  * @returns Array of vault data for each token
  */
 export async function getAllVaultData(
@@ -288,28 +312,27 @@ export async function getAllVaultData(
   }>,
 ): Promise<TokenVaultData[]> {
   const results = await Promise.all(
-    tokens.map((t) => getVaultData(t.token, t.tokenSymbol, t.monthlyBurnRate)),
+    tokens.map(async ({ token, tokenSymbol, monthlyBurnRate }) => {
+      // WORKAROUND: For XLM (empty token), read actual balance from Horizon
+      if (!token || token === "" || token === "native") {
+        const actualBalance = await getActualVaultBalance();
+        return {
+          token: "",
+          tokenSymbol: "XLM",
+          balance: actualBalance,
+          liability: 0n,
+          available: actualBalance,
+          monthlyBurnRate,
+          runwayDays: monthlyBurnRate > 0n
+            ? Number(actualBalance / (monthlyBurnRate / 30n))
+            : Infinity,
+        };
+      }
+      
+      // For other tokens, use contract
+      return getVaultData(token, tokenSymbol, monthlyBurnRate);
+    }),
   );
 
   return results.filter((r): r is TokenVaultData => r !== null);
-}
-
-// ─── getSupportedTokens ──────────────────────────────────────────────────────
-
-/**
- * Calls `get_supported_tokens` on the PayrollVault contract to get the list
- * of all token addresses supported by the vault.
- *
- * @returns Array of token contract addresses
- */
-export async function getSupportedTokens(): Promise<string[]> {
-  if (!PAYROLL_VAULT_CONTRACT_ID) return [];
-
-  const contract = new Contract(PAYROLL_VAULT_CONTRACT_ID);
-  const tokens = await simulateContractRead<string[]>(
-    PAYROLL_VAULT_CONTRACT_ID,
-    contract.call("get_supported_tokens"),
-  );
-
-  return tokens ?? [];
 }
