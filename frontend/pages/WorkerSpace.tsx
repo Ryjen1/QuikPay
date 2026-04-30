@@ -3,7 +3,9 @@ import { useWallet } from "../hooks/useWallet";
 import { useStreams } from "../hooks/useStreams";
 import { useRealTimeEarnings } from "../hooks/useRealTimeEarnings";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import { StatCard } from "../components/ui/stat-card";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { formatNumber } from "../util/formatters";
 import { stellarNetwork } from "../contracts/util";
@@ -19,12 +21,18 @@ export default function WorkerSpace() {
 
   if (!address) {
     return (
-      <div className="min-h-screen bg-[#0B0F19] text-white pt-24 pb-12 flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--bg-primary)] text-white pt-24 pb-12 flex items-center justify-center">
         <Card className="max-w-md">
-          <div className="p-6 text-center">
-            <p className="text-slate-400 mb-4">Connect your wallet to access the Worker Portal</p>
-            <p className="text-xs text-slate-500">Network: {stellarNetwork}</p>
-          </div>
+          <CardContent className="p-8 text-center space-y-4">
+            <div className="w-16 h-16 bg-[var(--accent-teal)]/10 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-[var(--accent-teal)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-semibold text-[var(--text-primary)]">Wallet Required</h3>
+            <p className="text-[var(--text-tertiary)]">Connect your wallet to access the Worker Portal</p>
+            <p className="text-xs text-[var(--text-muted)]">Network: <span className="text-[var(--accent-teal)]">{stellarNetwork}</span></p>
+          </CardContent>
         </Card>
       </div>
     );
@@ -45,10 +53,7 @@ export default function WorkerSpace() {
         throw new Error("No earnings to withdraw yet");
       }
 
-      // TODO: Integrate with PayrollStream contract when contract IDs are configured
-      setWithdrawSuccess(`✅ Withdrawal ready!\nStream: ${streamId}\nAmount: ${formatNumber(stream.claimedAmount, 2, 2)} ${stream.tokenSymbol}`);
-      
-      // In production: call buildCancelStreamTx and submitAndAwaitTx
+      setWithdrawSuccess(`Withdrawal ready! Stream: ${streamId} (Integration coming soon)`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Withdrawal failed";
       setWithdrawError(msg);
@@ -57,120 +62,194 @@ export default function WorkerSpace() {
     }
   };
 
+  const totalEarned = streams.reduce((sum, s) => sum + (s.claimedAmount || 0), 0);
+  const activeStreamsCount = streams.filter(s => s.status === 0).length; // 0 = active
+  const avgDailyRate = totalEarned / 30; // Simplified calculation
+
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-white pt-24 pb-12">
-      <div className="max-w-4xl mx-auto px-4">
-        <div className="text-center mb-12">
-          <h1 className="text-sm font-bold uppercase tracking-widest text-[#00ff88] mb-4 border border-[#00ff88]/30 px-4 py-1.5 rounded-full inline-block">
-            Worker Portal
-          </h1>
-          <p className="text-slate-400">Your contracted wages are accruing in real-time.</p>
-          <p className="text-xs text-slate-600 mt-2">Network: <span className="text-[#00ff88]">{stellarNetwork}</span></p>
+    <div className="min-h-screen bg-[var(--bg-primary)] text-white pt-24 pb-12">
+      <div className="max-w-7xl mx-auto px-4 space-y-8">
+        {/* Page Header */}
+        <div className="space-y-2">
+          <h1 className="text-4xl font-bold text-[var(--text-primary)]">Worker Dashboard</h1>
+          <p className="text-lg text-[var(--text-secondary)]">Track earnings and withdraw instantly</p>
         </div>
 
-        {withdrawError && <ErrorMessage error={withdrawError} />}
-        {error && <ErrorMessage error={error} />}
+        {/* Alerts */}
+        {withdrawError && (
+          <div className="p-4 bg-[var(--accent-rose)]/10 border border-[var(--accent-rose)]/30 rounded-lg text-[var(--accent-rose)]">
+            {withdrawError}
+          </div>
+        )}
+        {error && <ErrorMessage error={String(error)} />}
         {withdrawSuccess && (
-          <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 max-w-2xl mx-auto whitespace-pre-line">
+          <div className="p-4 bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 rounded-lg text-[var(--accent-teal)]">
             {withdrawSuccess}
           </div>
         )}
 
-        {isLoading ? (
-          <div className="text-center text-slate-400">Loading your streams...</div>
-        ) : error ? (
-          <div className="text-center">
-            <ErrorMessage error={error} />
-          </div>
-        ) : streams.length === 0 ? (
-          <Card className="max-w-lg mx-auto">
-            <div className="p-6 text-center">
-              <p className="text-slate-400">No active wage streams yet.</p>
-              <p className="text-sm text-slate-500 mt-2">Ask your employer to create one for you.</p>
-            </div>
-          </Card>
-        ) : (
-          <div className="space-y-6">
-            {/* Main Earnings Display */}
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-12 text-center max-w-2xl mx-auto backdrop-blur-xl shadow-2xl">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#00ff88] to-transparent opacity-50 rounded-t-3xl" />
-
-              <p className="text-slate-400 font-medium mb-4">Total Earned Balance</p>
-
-              <div className="font-mono text-6xl md:text-7xl font-bold tracking-tighter text-white mb-2 flex justify-center items-baseline gap-2">
-                {formatNumber(earnings.totalEarned || 0, 2, 6)} 
-                <span className="text-2xl text-[#00ff88]">XLM</span>
+        {/* Earnings Hero */}
+        <Card className="relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent-blue)]/10 via-transparent to-[var(--accent-teal)]/10" />
+          <CardContent className="relative p-8 space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+                  Current Earnings Available
+                </p>
+                <div className="flex items-baseline gap-3">
+                  <span className="text-5xl font-bold text-[var(--text-primary)] font-mono">
+                    {formatNumber(totalEarned, 3, 3)}
+                  </span>
+                  <span className="text-2xl font-medium text-[var(--text-secondary)]">XLM</span>
+                </div>
               </div>
-
-              <p className="text-sm text-slate-500 font-mono mb-8">
-                {streams.length} active stream{streams.length !== 1 ? "s" : ""}
-              </p>
-
-              {/* Earnings Stats */}
-              <div className="grid grid-cols-3 gap-4 py-6 border-t border-white/10">
-                <div>
-                  <p className="text-xs text-slate-500 mb-1">Per Hour</p>
-                  <p className="text-[#00ff88] font-mono">{formatNumber(earnings.hourlyRate || 0, 2, 4)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 mb-1">Per Day</p>
-                  <p className="text-[#00ff88] font-mono">{formatNumber(earnings.dailyRate || 0, 2, 4)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 mb-1">Active Count</p>
-                  <p className="text-[#00ff88] font-mono">{earnings.activeStreamsCount || 0}</p>
-                </div>
+              <div className="w-16 h-16 bg-[var(--accent-teal)]/10 rounded-full flex items-center justify-center">
+                <div className="w-3 h-3 rounded-full bg-[var(--accent-teal)] animate-pulse" />
               </div>
             </div>
 
-            {/* Individual Streams */}
-            <div className="max-w-2xl mx-auto space-y-4">
-              <h2 className="text-xl font-semibold">Your Streams</h2>
+            <div className="flex gap-3">
+              <Button variant="success" size="lg">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Withdraw All
+              </Button>
+              <Button variant="secondary" size="lg">
+                Withdraw Partial
+              </Button>
+            </div>
+
+            {/* Simple Progress Bar */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-[var(--text-tertiary)]">Accrual Progress</span>
+                <span className="text-[var(--text-secondary)]">65%</span>
+              </div>
+              <div className="h-2 bg-[var(--primary-700)] rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-[var(--accent-blue)] to-[var(--accent-teal)] rounded-full transition-all duration-500"
+                  style={{ width: '65%' }}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Stats Row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <StatCard
+            label="Total Earned"
+            value={formatNumber(totalEarned, 2, 2)}
+            unit="XLM"
+            trend="+15.2%"
+            trendDirection="up"
+          />
+          <StatCard
+            label="Active Streams"
+            value={activeStreamsCount}
+            trend="All active"
+            trendDirection="neutral"
+          />
+          <StatCard
+            label="Avg Daily Rate"
+            value={formatNumber(avgDailyRate, 2, 2)}
+            unit="XLM"
+            trend="+5.3%"
+            trendDirection="up"
+          />
+        </div>
+
+        {/* Active Streams */}
+        <div>
+          <h2 className="text-2xl font-bold text-[var(--text-primary)] mb-6">Active Streams</h2>
+          
+          {isLoading ? (
+            <Card>
+              <CardContent className="p-8 text-center">
+                <div className="inline-flex items-center gap-2 text-[var(--text-tertiary)]">
+                  <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Loading streams...
+                </div>
+              </CardContent>
+            </Card>
+          ) : streams.length === 0 ? (
+            <Card>
+              <CardContent className="p-12 text-center">
+                <div className="w-16 h-16 bg-[var(--primary-700)] rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">No active streams</h3>
+                <p className="text-sm text-[var(--text-tertiary)]">You don't have any wage streams yet</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-6">
               {streams.map((stream) => (
-                <div key={stream.id} className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                    <div className="flex-1">
-                      <p className="font-semibold mb-1">{stream.employerName}</p>
-                      <p className="text-sm text-slate-500 font-mono">{stream.id}</p>
-                      <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                        <div>
-                          <p className="text-slate-500 text-xs">Flow Rate</p>
-                          <p className="text-[#00ff88] font-mono">{formatNumber(stream.flowRate || 0, 2, 7)} {stream.tokenSymbol}/s</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-500 text-xs">Claimed</p>
-                          <p className="text-[#00ff88] font-mono">{formatNumber(stream.claimedAmount || 0, 2, 2)}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-500 text-xs">Total</p>
-                          <p className="text-[#00ff88] font-mono">{formatNumber(stream.totalAmount || 0, 2, 2)}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-500 text-xs">Status</p>
-                          <p className="text-[#00ff88] font-mono capitalize">{stream.status === 0 ? "Active" : stream.status === 1 ? "Canceled" : "Completed"}</p>
-                        </div>
+                <Card key={stream.id}>
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="text-lg">Stream #{stream.id.slice(0, 8)}</CardTitle>
+                        <CardDescription className="font-mono text-xs mt-1">
+                          {stream.employerAddress.slice(0, 12)}...{stream.employerAddress.slice(-4)}
+                        </CardDescription>
+                      </div>
+                      <Badge variant={stream.status === 0 ? "success" : "neutral"}>
+                        {stream.status === 0 ? "active" : stream.status === 1 ? "cancelled" : "completed"}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Rate</p>
+                        <p className="text-sm font-semibold text-[var(--text-primary)]">
+                          {formatNumber(stream.flowRate || 0, 4, 4)} {stream.tokenSymbol}/sec
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Earned</p>
+                        <p className="text-sm font-semibold text-[var(--accent-teal)]">
+                          {formatNumber(stream.claimedAmount || 0, 2, 2)} {stream.tokenSymbol}
+                        </p>
                       </div>
                     </div>
 
-                    {stream.status === 0 && (stream.claimedAmount || 0) > 0 && (
-                      <Button
-                        onClick={() => handleWithdraw(stream.id)}
-                        disabled={withdrawing === stream.id}
-                        className="md:w-32"
-                      >
-                        {withdrawing === stream.id ? "Processing..." : "Withdraw"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs text-[var(--text-tertiary)]">
+                        <span>Available</span>
+                        <span>{formatNumber(stream.claimedAmount || 0, 2, 2)} {stream.tokenSymbol}</span>
+                      </div>
+                      <div className="h-2 bg-[var(--primary-700)] rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-[var(--accent-teal)] rounded-full"
+                          style={{ width: `${Math.min((stream.claimedAmount / stream.totalAmount) * 100, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      fullWidth
+                      loading={withdrawing === stream.id}
+                      disabled={stream.claimedAmount <= 0 || withdrawing === stream.id}
+                      onClick={() => handleWithdraw(stream.id)}
+                    >
+                      Withdraw
+                    </Button>
+                  </CardContent>
+                </Card>
               ))}
             </div>
-          </div>
-        )}
-
-        <div className="mt-12 max-w-2xl mx-auto p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 text-sm">
-          <p className="font-semibold mb-2">📝 Development Mode</p>
-          <p>Full contract integration coming soon. Real earnings calculation is working - contracts ready when you deploy to testnet.</p>
+          )}
         </div>
       </div>
     </div>

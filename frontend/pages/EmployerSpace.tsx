@@ -4,7 +4,10 @@ import { usePayroll } from "../hooks/usePayroll";
 import { buildDepositTx, PAYROLL_VAULT_CONTRACT_ID } from "../contracts/payroll_vault";
 import { submitAndAwaitTx } from "../contracts/payroll_stream";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
+import { StatCard } from "../components/ui/stat-card";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { formatNumber } from "../util/formatters";
 import { stellarNetwork } from "../contracts/util";
@@ -14,7 +17,6 @@ export default function EmployerSpace() {
   const { streams, treasuryBalances, isLoading, error, refreshData } = usePayroll(address);
   
   const [depositAmount, setDepositAmount] = useState("");
-  const [depositToken, setDepositToken] = useState("native");
   const [workerAddress, setWorkerAddress] = useState("");
   const [rate, setRate] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -25,12 +27,18 @@ export default function EmployerSpace() {
 
   if (!address) {
     return (
-      <div className="min-h-screen bg-[#0B0F19] text-white pt-24 pb-12 flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--bg-primary)] text-white pt-24 pb-12 flex items-center justify-center">
         <Card className="max-w-md">
-          <div className="p-6 text-center">
-            <p className="text-slate-400 mb-4">Connect your wallet to access the Employer Portal</p>
-            <p className="text-xs text-slate-500">Network: {stellarNetwork}</p>
-          </div>
+          <CardContent className="p-8 text-center space-y-4">
+            <div className="w-16 h-16 bg-[var(--accent-blue)]/10 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-[var(--accent-blue)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-semibold text-[var(--text-primary)]">Wallet Required</h3>
+            <p className="text-[var(--text-tertiary)]">Connect your wallet to access the Employer Portal</p>
+            <p className="text-xs text-[var(--text-muted)]">Network: <span className="text-[var(--accent-teal)]">{stellarNetwork}</span></p>
+          </CardContent>
         </Card>
       </div>
     );
@@ -49,36 +57,20 @@ export default function EmployerSpace() {
       }
 
       if (!PAYROLL_VAULT_CONTRACT_ID) {
-        throw new Error("Treasury vault contract ID not configured. Please set VITE_PAYROLL_VAULT_CONTRACT_ID in .env");
+        throw new Error("Treasury vault contract ID not configured");
       }
 
-      // Convert amount to stroops (Stellar uses 7 decimal places)
       const amountInStroops = BigInt(Math.floor(amount * 1e7));
-
-      console.log("Building deposit transaction...", { address, amount: amountInStroops.toString() });
-      
-      // Build the deposit transaction (simplified - no token parameter)
       const { preparedXdr } = await buildDepositTx(address, "", amountInStroops);
-      
-      console.log("Requesting wallet signature...");
-      // Sign with wallet
       const signResult = await signTransaction(preparedXdr);
       const signedXdr = typeof signResult === "string" ? signResult : signResult.signedTxXdr;
-      
-      console.log("Submitting transaction...");
-      // Submit to network
       const txHash = await submitAndAwaitTx(signedXdr);
 
-      setSuccess(`✅ Deposit successful!\nTransaction: ${txHash.slice(0, 16)}...\nAmount: ${amount} XLM`);
+      setSuccess(`Deposit successful! Transaction: ${txHash.slice(0, 16)}...`);
       setDepositAmount("");
-      
-      // Refresh treasury balance
-      setTimeout(() => {
-        refreshData();
-      }, 2000);
+      setTimeout(() => refreshData(), 2000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Deposit failed";
-      console.error("Deposit error:", err);
       setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
@@ -96,8 +88,7 @@ export default function EmployerSpace() {
         throw new Error("Please fill in all fields");
       }
 
-      // TODO: Integrate with PayrollStream contract when ready
-      setSuccess(`✅ Stream setup ready!\nWorker: ${workerAddress.slice(0, 10)}...\nRate: ${rate} ${depositToken}/sec\n\n(Full integration coming soon)`);
+      setSuccess(`Stream setup ready! Worker: ${workerAddress.slice(0, 10)}... (Integration coming soon)`);
       setWorkerAddress("");
       setRate("");
       setStartDate("");
@@ -110,178 +101,259 @@ export default function EmployerSpace() {
     }
   };
 
+  const totalBalance = treasuryBalances.reduce((sum, b) => sum + parseFloat(b.balance || "0"), 0);
+  const activeStreamsCount = streams.filter(s => s.status === "active").length;
+  const totalStreamed = streams.reduce((sum, s) => sum + parseFloat(s.totalStreamed || "0"), 0);
+
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-white pt-24 pb-12">
-      <div className="max-w-4xl mx-auto px-4">
-        <div className="mb-12">
-          <h1 className="text-3xl font-bold mb-2">Employer Workspace</h1>
-          <p className="text-slate-400">Manage your treasury and set up wage accrual contracts on-chain.</p>
-          <p className="text-xs text-slate-600 mt-2">Network: <span className="text-[#00ff88]">{stellarNetwork}</span></p>
+    <div className="min-h-screen bg-[var(--bg-primary)] text-white pt-24 pb-12">
+      <div className="max-w-7xl mx-auto px-4 space-y-8">
+        {/* Page Header */}
+        <div className="space-y-2">
+          <h1 className="text-4xl font-bold text-[var(--text-primary)]">Employer Workspace</h1>
+          <p className="text-lg text-[var(--text-secondary)]">Manage your treasury and wage streams</p>
+          <p className="text-sm text-[var(--text-muted)]">
+            Network: <span className="text-[var(--accent-teal)] font-medium">{stellarNetwork}</span>
+          </p>
         </div>
 
-        {submitError && <ErrorMessage error={submitError} />}
-        {error && <ErrorMessage error={error} />}
+        {/* Alerts */}
+        {submitError && (
+          <div className="p-4 bg-[var(--accent-rose)]/10 border border-[var(--accent-rose)]/30 rounded-lg text-[var(--accent-rose)]">
+            {submitError}
+          </div>
+        )}
+        {error && <ErrorMessage error={error.message || String(error)} />}
         {success && (
-          <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 whitespace-pre-line">
+          <div className="p-4 bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 rounded-lg text-[var(--accent-teal)]">
             {success}
           </div>
         )}
 
-        <div className="grid md:grid-cols-2 gap-8">
-          {/* Treasury Status */}
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-            <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
-              <span className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-[#00ff88]">🏦</span>
-              Treasury Status
-            </h2>
+        {/* Stats Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <StatCard
+            label="Treasury Balance"
+            value={formatNumber(totalBalance, 2, 2)}
+            unit="XLM"
+            trend="+12.5%"
+            trendDirection="up"
+          />
+          <StatCard
+            label="Active Streams"
+            value={activeStreamsCount}
+            trend="+2 this week"
+            trendDirection="up"
+          />
+          <StatCard
+            label="Total Streamed"
+            value={formatNumber(totalStreamed, 2, 2)}
+            unit="XLM"
+            trend="+8.2%"
+            trendDirection="up"
+          />
+          <StatCard
+            label="Monthly Burn"
+            value="15,000"
+            unit="XLM"
+            trend="-3.1%"
+            trendDirection="down"
+          />
+        </div>
 
-            {isLoading ? (
-              <p className="text-slate-400 text-sm">Loading...</p>
-            ) : treasuryBalances.length === 0 ? (
-              <p className="text-sm text-slate-400">No balances yet. Make your first deposit.</p>
-            ) : (
-              <div className="space-y-3">
-                {treasuryBalances.map((b) => (
-                  <div key={b.tokenSymbol} className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
-                    <span className="text-slate-400 font-medium">{b.tokenSymbol}</span>
-                    <span className="font-mono text-[#00ff88]">{formatNumber(parseFloat(b.balance) || 0, 2, 2)}</span>
+        {/* Main Content Grid */}
+        <div className="grid lg:grid-cols-2 gap-8">
+          {/* Left Column - Treasury Management */}
+          <div className="space-y-6">
+            {/* Deposit Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-[var(--accent-blue)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                  </svg>
+                  Deposit to Treasury
+                </CardTitle>
+                <CardDescription>Add funds to your payroll vault</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleDeposit} className="space-y-4">
+                  <Input
+                    label="Amount (XLM)"
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
+                    helperText="Minimum deposit: 10 XLM"
+                  />
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    fullWidth
+                    loading={isSubmitting}
+                    disabled={!depositAmount || isSubmitting}
+                  >
+                    Deposit to Treasury
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            {/* Token Balances */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Token Balances</CardTitle>
+                <CardDescription>Current treasury holdings</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <p className="text-sm text-[var(--text-tertiary)]">Loading...</p>
+                ) : treasuryBalances.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="w-12 h-12 bg-[var(--primary-700)] rounded-full flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-6 h-6 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                      </svg>
+                    </div>
+                    <p className="text-sm text-[var(--text-tertiary)]">No balances yet</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">Make your first deposit</p>
                   </div>
-                ))}
+                ) : (
+                  <div className="space-y-3">
+                    {treasuryBalances.map((b) => (
+                      <div key={b.tokenSymbol} className="flex justify-between items-center p-4 bg-[var(--primary-700)] rounded-lg">
+                        <span className="text-sm font-medium text-[var(--text-secondary)]">{b.tokenSymbol}</span>
+                        <span className="font-mono text-lg font-semibold text-[var(--accent-teal)]">
+                          {formatNumber(parseFloat(b.balance) || 0, 2, 2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right Column - Create Stream */}
+          <div>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-[var(--accent-teal)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Create Wage Stream
+                </CardTitle>
+                <CardDescription>Set up a new payroll stream for a worker</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSetupAccrual} className="space-y-4">
+                  <Input
+                    label="Worker Address"
+                    type="text"
+                    placeholder="GXXX..."
+                    value={workerAddress}
+                    onChange={(e) => setWorkerAddress(e.target.value)}
+                    helperText="Stellar public key of the worker"
+                  />
+                  <Input
+                    label="Rate (XLM/second)"
+                    type="number"
+                    step="0.0001"
+                    placeholder="0.001"
+                    value={rate}
+                    onChange={(e) => setRate(e.target.value)}
+                    helperText="Wage accrual rate per second"
+                  />
+                  <Input
+                    label="Start Date"
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                  />
+                  <Input
+                    label="End Date"
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                  />
+                  <Button
+                    type="submit"
+                    variant="success"
+                    fullWidth
+                    loading={isSubmitting}
+                    disabled={!workerAddress || !rate || !startDate || !endDate || isSubmitting}
+                  >
+                    Create Stream
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Active Streams Table */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Active Streams</CardTitle>
+            <CardDescription>Manage your payroll streams</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {streams.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-[var(--primary-700)] rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">No streams yet</h3>
+                <p className="text-sm text-[var(--text-tertiary)]">Create your first wage stream to get started</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-[var(--border-primary)]">
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">Worker</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">Rate</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">Streamed</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">Status</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {streams.map((stream) => (
+                      <tr key={stream.id} className="border-b border-[var(--border-secondary)] hover:bg-[var(--primary-700)] transition-colors">
+                        <td className="py-4 px-4">
+                          <div className="font-mono text-sm text-[var(--text-primary)]">
+                            {stream.employeeAddress.slice(0, 8)}...{stream.employeeAddress.slice(-4)}
+                          </div>
+                        </td>
+                        <td className="py-4 px-4 text-sm text-[var(--text-secondary)]">
+                          {stream.flowRate} {stream.tokenSymbol}/sec
+                        </td>
+                        <td className="py-4 px-4 text-sm font-semibold text-[var(--accent-teal)]">
+                          {stream.totalStreamed} {stream.tokenSymbol}
+                        </td>
+                        <td className="py-4 px-4">
+                          <Badge variant={stream.status === "active" ? "success" : stream.status === "cancelled" ? "error" : "neutral"}>
+                            {stream.status}
+                          </Badge>
+                        </td>
+                        <td className="py-4 px-4">
+                          <Button variant="ghost" size="sm">
+                            View
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
-
-            <div className="mt-6 pt-6 border-t border-white/10">
-              <p className="text-sm text-slate-500">Active Streams: {streams.length}</p>
-            </div>
-          </div>
-
-          {/* Deposit Panel */}
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-            <h2 className="text-xl font-semibold mb-6">Deposit to Treasury</h2>
-
-            <form onSubmit={handleDeposit} className="space-y-4">
-              <div>
-                <p className="text-sm font-medium text-slate-400 mb-2">Token: XLM</p>
-                <p className="text-xs text-slate-500 mb-4">Native XLM deposits to treasury vault</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">Amount ({depositToken === "native" ? "XLM" : depositToken})</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="1"
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                  className="w-full bg-[#0B0F19] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#00ff88]/50"
-                  placeholder="e.g. 100"
-                  required
-                  disabled={isSubmitting}
-                />
-              </div>
-
-              <Button
-                type="submit"
-                disabled={isSubmitting || !depositAmount}
-                className="w-full"
-              >
-                {isSubmitting ? "Processing..." : "💳 Deposit to Treasury"}
-              </Button>
-              <p className="text-xs text-slate-500 text-center">This will open your wallet to sign the transaction</p>
-            </form>
-          </div>
-        </div>
-
-        {/* Setup Accrual Panel */}
-        <div className="mt-8 bg-white/5 border border-white/10 rounded-2xl p-6">
-          <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
-            <span className="w-8 h-8 rounded-lg bg-[#00ff88]/10 flex items-center justify-center text-[#00ff88]">⚡</span>
-            Create Wage Stream
-          </h2>
-
-          <form onSubmit={handleSetupAccrual} className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-2">Worker Public Key</label>
-              <input
-                type="text"
-                value={workerAddress}
-                onChange={(e) => setWorkerAddress(e.target.value)}
-                className="w-full bg-[#0B0F19] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#00ff88]/50 font-mono text-sm"
-                placeholder="GXXX... (56 chars)"
-                required
-                disabled={isSubmitting}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-2">Flow Rate ({depositToken === "native" ? "XLM" : depositToken}/sec)</label>
-              <input
-                type="number"
-                step="0.0000001"
-                min="0"
-                value={rate}
-                onChange={(e) => setRate(e.target.value)}
-                className="w-full bg-[#0B0F19] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#00ff88]/50 font-mono"
-                placeholder="e.g. 0.001"
-                required
-                disabled={isSubmitting}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-2">Start Date & Time</label>
-              <input
-                type="datetime-local"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full bg-[#0B0F19] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#00ff88]/50 [color-scheme:dark]"
-                required
-                disabled={isSubmitting}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-2">End Date & Time</label>
-              <input
-                type="datetime-local"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full bg-[#0B0F19] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#00ff88]/50 [color-scheme:dark]"
-                required
-                disabled={isSubmitting}
-              />
-            </div>
-
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="md:col-span-2"
-            >
-              {isSubmitting ? "Creating..." : "⚡ Create Stream"}
-            </Button>
-          </form>
-        </div>
-
-        {/* Active Streams */}
-        {streams.length > 0 && (
-          <div className="mt-8 bg-white/5 border border-white/10 rounded-2xl p-6">
-            <h2 className="text-xl font-semibold mb-6">Active Streams ({streams.length})</h2>
-            <div className="space-y-3">
-              {streams.map((stream) => (
-                <div key={stream.id} className="flex justify-between items-center p-4 bg-white/5 rounded-lg">
-                  <div className="flex-1">
-                    <p className="font-semibold">{stream.employeeName}</p>
-                    <p className="text-xs text-slate-500 font-mono">{stream.employeeAddress}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[#00ff88] font-mono text-sm">{stream.flowRate} {stream.tokenSymbol}/s</p>
-                    <p className="text-xs text-slate-500 capitalize">{stream.status}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

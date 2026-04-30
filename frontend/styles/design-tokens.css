@@ -1,0 +1,206 @@
+/**
+ * QuikPay Design System Tokens
+ * Modern, professional fintech aesthetic
+ */
+
+:root {
+  /* ============================================
+     PRIMARY COLORS - Financial Depth Theme
+     ============================================ */
+  --primary-900: #0A1628;
+  --primary-800: #132340;
+  --primary-700: #1E3A5F;
+  --primary-600: #2B5278;
+
+  /* ============================================
+     ACCENT COLORS - Sophisticated, Not Neon
+     ============================================ */
+  --accent-blue: #4A90E2;
+  --accent-blue-dark: #3A7BC8;
+  --accent-blue-light: #5BA3F5;
+  
+  --accent-teal: #2DD4BF;
+  --accent-teal-dark: #1DB8A5;
+  --accent-teal-light: #4DE0CC;
+  
+  --accent-amber: #F59E0B;
+  --accent-amber-dark: #D97706;
+  --accent-amber-light: #FBBF24;
+  
+  --accent-rose: #FB7185;
+  --accent-rose-dark: #F43F5E;
+  --accent-rose-light: #FDA4AF;
+  
+  --accent-violet: #8B5CF6;
+  --accent-violet-dark: #7C3AED;
+  --accent-violet-light: #A78BFA;
+
+  /* ============================================
+     NEUTRAL COLORS
+     ============================================ */
+  --neutral-50: #F8FAFC;
+  --neutral-100: #F1F5F9;
+  --neutral-200: #E2E8F0;
+  --neutral-300: #CBD5E1;
+  --neutral-400: #94A3B8;
+  --neutral-500: #64748B;
+  --neutral-600: #475569;
+  --neutral-700: #334155;
+  --neutral-800: #1E293B;
+  --neutral-900: #0F172A;
+
+  /* ============================================
+     GRADIENTS
+     ============================================ */
+  --gradient-primary: linear-gradient(135deg, #4A90E2 0%, #2DD4BF 100%);
+  --gradient-premium: linear-gradient(135deg, #8B5CF6 0%, #4A90E2 100%);
+  --gradient-warm: linear-gradient(135deg, #F59E0B 0%, #FB7185 100%);
+  --gradient-surface: linear-gradient(180deg, #132340 0%, #0A1628 100%);
+  --gradient-mesh: radial-gradient(circle at 20% 50%, rgba(74, 144, 226, 0.15) 0%, transparent 50%),
+                   radial-gradient(circle at 80% 80%, rgba(45, 212, 191, 0.1) 0%, transparent 50%);
+
+  /* ============================================
+     TYPOGRAPHY
+     ============================================ */
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+
+  /* Font Sizes */
+  --text-xs: 0.75rem;      /* 12px */
+  --text-sm: 0.875rem;     /* 14px */
+  --text-base: 1rem;       /* 16px */
+  --text-lg: 1.125rem;     /* 18px */
+  --text-xl: 1.25rem;      /* 20px */
+  --text-2xl: 1.5rem;      /* 24px */
+  --text-3xl: 1.875rem;    /* 30px */
+  --text-4xl: 2.25rem;     /* 36px */
+  --text-5xl: 3rem;        /* 48px */
+  --text-6xl: 3.75rem;     /* 60px */
+
+  /* Font Weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --font-extrabold: 800;
+
+  /* Line Heights */
+  --leading-none: 1;
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+  --leading-loose: 2;
+
+  /* ============================================
+     SPACING - 4px Base Unit
+     ============================================ */
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+  --space-20: 5rem;     /* 80px */
+  --space-24: 6rem;     /* 96px */
+
+  /* ============================================
+     BORDER RADIUS
+     ============================================ */
+  --radius-sm: 0.25rem;   /* 4px */
+  --radius-base: 0.5rem;  /* 8px */
+  --radius-md: 0.75rem;   /* 12px */
+  --radius-lg: 1rem;      /* 16px */
+  --radius-xl: 1.5rem;    /* 24px */
+  --radius-full: 9999px;
+
+  /* ============================================
+     SHADOWS
+     ============================================ */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-base: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.16);
+  --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.2);
+  --shadow-2xl: 0 24px 48px rgba(0, 0, 0, 0.3);
+  
+  /* Colored Shadows */
+  --shadow-blue: 0 4px 12px rgba(74, 144, 226, 0.3);
+  --shadow-teal: 0 4px 12px rgba(45, 212, 191, 0.3);
+  --shadow-violet: 0 4px 12px rgba(139, 92, 246, 0.3);
+
+  /* ============================================
+     TRANSITIONS
+     ============================================ */
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 350ms;
+  --duration-slower: 500ms;
+
+  /* Easing Functions */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* ============================================
+     Z-INDEX LAYERS
+     ============================================ */
+  --z-base: 0;
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-fixed: 30;
+  --z-modal-backdrop: 40;
+  --z-modal: 50;
+  --z-popover: 60;
+  --z-tooltip: 70;
+
+  /* ============================================
+     BREAKPOINTS (for reference in JS)
+     ============================================ */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+}
+
+/* ============================================
+   SEMANTIC COLOR TOKENS
+   ============================================ */
+:root {
+  /* Backgrounds */
+  --bg-primary: var(--primary-900);
+  --bg-secondary: var(--primary-800);
+  --bg-tertiary: var(--primary-700);
+  --bg-elevated: var(--primary-600);
+
+  /* Text Colors */
+  --text-primary: var(--neutral-50);
+  --text-secondary: var(--neutral-300);
+  --text-tertiary: var(--neutral-400);
+  --text-muted: var(--neutral-500);
+  --text-inverse: var(--primary-900);
+
+  /* Border Colors */
+  --border-primary: rgba(255, 255, 255, 0.08);
+  --border-secondary: rgba(255, 255, 255, 0.05);
+  --border-focus: var(--accent-blue);
+
+  /* State Colors */
+  --color-success: var(--accent-teal);
+  --color-warning: var(--accent-amber);
+  --color-error: var(--accent-rose);
+  --color-info: var(--accent-blue);
+
+  /* Interactive */
+  --color-primary: var(--accent-blue);
+  --color-primary-hover: var(--accent-blue-dark);
+  --color-primary-active: var(--accent-blue-dark);
+}
