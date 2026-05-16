@@ -119,11 +119,6 @@ export async function buildCreateStreamTx(
         nativeToScVal(params.amount, { type: "i128" }),
         nativeToScVal(BigInt(params.startTs), { type: "u64" }),
         nativeToScVal(BigInt(params.endTs), { type: "u64" }),
-        params.metadataHash
-          ? nativeToScVal(Buffer.from(params.metadataHash, "hex"), {
-              type: "bytes",
-            })
-          : xdr.ScVal.scvVoid(),
       ),
     )
     .setTimeout(30)
@@ -162,7 +157,6 @@ export async function buildCancelStreamTx(
         "cancel_stream",
         nativeToScVal(streamId, { type: "u64" }),
         new Address(employer).toScVal(),
-        nativeToScVal(null), // For the 'to' option in Soroban which is an Option<Address> or something? Wait...
       ),
     )
     .setTimeout(30)
@@ -175,41 +169,41 @@ export async function buildCancelStreamTx(
 // ─── checkTreasurySolvency ────────────────────────────────────────────────────
 
 /**
- * Calls `check_solvency` on the PayrollVault contract to determine whether
- * the vault holds enough funds for the requested stream total.
+ * Checks whether the employer's vault has at least `requiredAmount` of
+ * available balance (balance minus existing liability) to fund a new stream.
  *
- * Returns `true` if the treasury is solvent, `false` otherwise.
+ * The second argument is the employer address; `tokenContractId` is retained
+ * in the signature for backward compatibility with older callers but is
+ * unused — the current vault contract holds a single asset (native XLM).
  */
 export async function checkTreasurySolvency(
   vaultContractId: string,
-  tokenContractId: string,
+  employerAddress: string,
   requiredAmount: bigint,
 ): Promise<boolean> {
-  if (!vaultContractId) {
-    // No vault configured — optimistically allow the user to proceed
+  if (!vaultContractId || !employerAddress) {
+    // No vault or employer — optimistically allow the user to proceed
     return true;
   }
 
   const server = getRpcServer();
   const contract = new Contract(vaultContractId);
 
-  // We use a dummy source account for read-only simulation
-  const dummySource = await server
-    .getAccount(vaultContractId)
-    .catch(() => null);
-  if (!dummySource) return true;
+  // Use the employer account as source; fall back to the contract itself
+  let source = await server.getAccount(employerAddress).catch(() => null);
+  if (!source) {
+    source = await server.getAccount(vaultContractId).catch(() => null);
+  }
+  if (!source) return true;
 
-  const tx = new TransactionBuilder(dummySource, {
+  const tx = new TransactionBuilder(source, {
     fee: "100",
     networkPassphrase,
   })
     .addOperation(
       contract.call(
-        "check_solvency",
-        tokenContractId
-          ? new Address(tokenContractId).toScVal()
-          : nativeToScVal(null, { type: "address" }),
-        nativeToScVal(requiredAmount, { type: "i128" }),
+        "get_available",
+        new Address(employerAddress).toScVal(),
       ),
     )
     .setTimeout(10)
@@ -224,9 +218,10 @@ export async function checkTreasurySolvency(
 
   const result = (response as SorobanRpc.Api.SimulateTransactionSuccessResponse)
     .result?.retval;
-  if (!result) return true;
+  if (!result) return false;
 
-  return scValToNative(result) as boolean;
+  const available = scValToNative(result) as bigint;
+  return available >= requiredAmount;
 }
 
 // ─── getWithdrawable ─────────────────────────────────────────────────────────
@@ -416,12 +411,15 @@ export async function getStreamsByWorker(
     contract.call(
       "get_streams_by_worker",
       new Address(workerAddress).toScVal(),
-      nativeToScVal(offset !== undefined ? offset : null),
-      nativeToScVal(limit !== undefined ? limit : null),
     ),
   );
 
-  return ids ?? [];
+  // Client-side pagination since the contract returns all stream IDs
+  const all = ids ?? [];
+  if (offset === undefined && limit === undefined) return all;
+  const start = offset ?? 0;
+  const end = limit !== undefined ? start + limit : undefined;
+  return all.slice(start, end);
 }
 
 // ─── getStreamsByEmployer ───────────────────────────────────────────────────────
@@ -443,12 +441,15 @@ export async function getStreamsByEmployer(
     contract.call(
       "get_streams_by_employer",
       new Address(employerAddress).toScVal(),
-      nativeToScVal(offset !== undefined ? offset : null),
-      nativeToScVal(limit !== undefined ? limit : null),
     ),
   );
 
-  return ids ?? [];
+  // Client-side pagination since the contract returns all stream IDs
+  const all = ids ?? [];
+  if (offset === undefined && limit === undefined) return all;
+  const start = offset ?? 0;
+  const end = limit !== undefined ? start + limit : undefined;
+  return all.slice(start, end);
 }
 
 // ─── getStreamById ────────────────────────────────────────────────────────────

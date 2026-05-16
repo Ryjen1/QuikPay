@@ -2,7 +2,6 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useCallback } from "react";
 import {
   getAllVaultData,
-  getVaultBalance,
   type TokenVaultData,
 } from "../contracts/payroll_vault";
 import {
@@ -69,7 +68,7 @@ export const useVaultData = (employerAddress: string | undefined) => {
     queryKey: CACHE_KEYS.vaultData(employerAddress || ""),
     queryFn: async () => {
       if (!employerAddress) return [];
-      const data = await getAllVaultData(DEFAULT_TOKENS);
+      const data = await getAllVaultData(employerAddress, DEFAULT_TOKENS);
       return data;
     },
     enabled: !!employerAddress,
@@ -77,7 +76,8 @@ export const useVaultData = (employerAddress: string | undefined) => {
     select: (data) =>
       data.map((v: TokenVaultData) => ({
         tokenSymbol: v.tokenSymbol,
-        balance: v.balance.toString(),
+        // Convert stroops (i128) → human-readable token units (10^7 stroops = 1 XLM)
+        balance: (Number(v.balance) / STROOPS_PER_UNIT).toFixed(7),
       })),
   });
 };

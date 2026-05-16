@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useWallet } from "../hooks/useWallet";
 import { usePayroll } from "../hooks/usePayroll";
 import { buildDepositTx, PAYROLL_VAULT_CONTRACT_ID } from "../contracts/payroll_vault";
-import { submitAndAwaitTx } from "../contracts/payroll_stream";
+import {
+  buildCreateStreamTx,
+  submitAndAwaitTx,
+  PAYROLL_STREAM_CONTRACT_ID,
+} from "../contracts/payroll_stream";
 import { Button } from "../components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
@@ -17,13 +21,26 @@ export default function EmployerSpace() {
   const { streams, treasuryBalances, isLoading, error, refreshData } = usePayroll(address);
   
   const [depositAmount, setDepositAmount] = useState("");
+
+  // Create-stream form: employer enters human-friendly fields and we compute
+  // the per-second rate + end timestamp before calling the contract.
+  const [workerName, setWorkerName] = useState("");
   const [workerAddress, setWorkerAddress] = useState("");
-  const [rate, setRate] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [totalAmount, setTotalAmount] = useState("");
+  const [durationHours, setDurationHours] = useState("");
+  const [durationMinutes, setDurationMinutes] = useState("");
+  const [startNow, setStartNow] = useState(true);
+  const [startAt, setStartAt] = useState(""); // datetime-local string
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // Synchronous guards against double-submission. React state (`isSubmitting`)
+  // updates asynchronously so it can't prevent two synchronous submit events
+  // (browser submit + React handler, StrictMode, double-click, etc.) from
+  // both passing the disabled check.
+  const depositSubmittingRef = useRef(false);
+  const streamSubmittingRef = useRef(false);
 
   if (!address) {
     return (
@@ -46,6 +63,10 @@ export default function EmployerSpace() {
 
   const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Synchronous guard: bail immediately if a submit is already in flight.
+    if (depositSubmittingRef.current) return;
+    depositSubmittingRef.current = true;
+
     setSubmitError(null);
     setSuccess(null);
     setIsSubmitting(true);
@@ -61,7 +82,7 @@ export default function EmployerSpace() {
       }
 
       const amountInStroops = BigInt(Math.floor(amount * 1e7));
-      const { preparedXdr } = await buildDepositTx(address, "", amountInStroops);
+      const { preparedXdr } = await buildDepositTx(address, amountInStroops);
       const signResult = await signTransaction(preparedXdr);
       const signedXdr = typeof signResult === "string" ? signResult : signResult.signedTxXdr;
       const txHash = await submitAndAwaitTx(signedXdr);
@@ -74,32 +95,122 @@ export default function EmployerSpace() {
       setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
+      depositSubmittingRef.current = false;
     }
   };
 
-  const handleSetupAccrual = async (e: React.FormEvent) => {
+  const handleCreateStream = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (streamSubmittingRef.current) return;
+    streamSubmittingRef.current = true;
+
     setSubmitError(null);
     setSuccess(null);
     setIsSubmitting(true);
 
     try {
-      if (!workerAddress || !rate || !startDate || !endDate) {
-        throw new Error("Please fill in all fields");
+      if (!PAYROLL_STREAM_CONTRACT_ID) {
+        throw new Error("Stream contract ID not configured");
+      }
+      if (!workerAddress.trim()) {
+        throw new Error("Worker address is required");
+      }
+      if (!/^G[A-Z2-7]{55}$/.test(workerAddress.trim())) {
+        throw new Error("Worker address must be a valid Stellar public key (G…)");
       }
 
-      setSuccess(`Stream setup ready! Worker: ${workerAddress.slice(0, 10)}... (Integration coming soon)`);
+      const total = parseFloat(totalAmount);
+      if (!total || total <= 0) {
+        throw new Error("Total amount must be a positive number");
+      }
+
+      const hours = parseInt(durationHours || "0", 10);
+      const minutes = parseInt(durationMinutes || "0", 10);
+      const durationSeconds = hours * 3600 + minutes * 60;
+      if (durationSeconds <= 0) {
+        throw new Error("Duration must be at least 1 minute");
+      }
+
+      // Stream starts in ~30s by default to give wallet signing + ledger
+      // settlement enough headroom that `start_ts >= now` when the contract
+      // executes (contract rejects start_ts in the past).
+      const nowSec = Math.floor(Date.now() / 1000);
+      let startTs: number;
+      if (startNow) {
+        startTs = nowSec + 30;
+      } else {
+        const parsed = Math.floor(new Date(startAt).getTime() / 1000);
+        if (!Number.isFinite(parsed)) {
+          throw new Error("Invalid start date/time");
+        }
+        if (parsed < nowSec + 10) {
+          throw new Error("Custom start time must be at least 10 seconds in the future");
+        }
+        startTs = parsed;
+      }
+      const endTs = startTs + durationSeconds;
+
+      // Convert to stroops; compute integer per-second rate.
+      const totalStroops = BigInt(Math.floor(total * 1e7));
+      const rateStroops = totalStroops / BigInt(durationSeconds);
+      if (rateStroops <= 0n) {
+        throw new Error(
+          "Amount is too small for the chosen duration (per-second rate rounds to 0).",
+        );
+      }
+      // Use rate * duration as the locked total so rate*elapsed math never
+      // exceeds total_amount; any sub-stroop remainder is left in the vault.
+      const lockedTotal = rateStroops * BigInt(durationSeconds);
+
+      const { preparedXdr } = await buildCreateStreamTx({
+        employer: address,
+        worker: workerAddress.trim(),
+        token: "", // native XLM
+        rate: rateStroops,
+        amount: lockedTotal,
+        startTs,
+        endTs,
+      });
+      const signResult = await signTransaction(preparedXdr);
+      const signedXdr =
+        typeof signResult === "string" ? signResult : signResult.signedTxXdr;
+      const txHash = await submitAndAwaitTx(signedXdr);
+
+      const workerLabel = workerName.trim()
+        ? `${workerName.trim()} (${workerAddress.slice(0, 6)}…)`
+        : `${workerAddress.slice(0, 10)}…`;
+      setSuccess(
+        `Stream created for ${workerLabel}: ${(Number(lockedTotal) / 1e7).toFixed(7)} XLM over ${hours}h ${minutes}m. Transaction: ${txHash}`,
+      );
+
+      setWorkerName("");
       setWorkerAddress("");
-      setRate("");
-      setStartDate("");
-      setEndDate("");
+      setTotalAmount("");
+      setDurationHours("");
+      setDurationMinutes("");
+      setStartNow(true);
+      setStartAt("");
+
+      setTimeout(() => refreshData(), 2000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Stream creation failed";
       setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
+      streamSubmittingRef.current = false;
     }
   };
+
+  // ─── Derived: live preview for the create-stream form ──────────────────────
+  const previewDurationSec =
+    (parseInt(durationHours || "0", 10) || 0) * 3600 +
+    (parseInt(durationMinutes || "0", 10) || 0) * 60;
+  const previewTotal = parseFloat(totalAmount) || 0;
+  const previewRatePerSec =
+    previewDurationSec > 0 && previewTotal > 0
+      ? previewTotal / previewDurationSec
+      : 0;
+  const previewRatePerHour = previewRatePerSec * 3600;
 
   const totalBalance = treasuryBalances.reduce((sum, b) => sum + parseFloat(b.balance || "0"), 0);
   const activeStreamsCount = streams.filter(s => s.status === "active").length;
@@ -268,42 +379,110 @@ export default function EmployerSpace() {
                 <CardDescription>Set up a new payroll stream for a worker</CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleSetupAccrual} className="space-y-4">
+                <form onSubmit={handleCreateStream} className="space-y-4">
+                  <Input
+                    label="Worker Name (optional)"
+                    type="text"
+                    placeholder="e.g. Jane Doe"
+                    value={workerName}
+                    onChange={(e) => setWorkerName(e.target.value)}
+                    helperText="Display name shown in your dashboard only"
+                  />
                   <Input
                     label="Worker Address"
                     type="text"
-                    placeholder="GXXX..."
+                    placeholder="GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
                     value={workerAddress}
                     onChange={(e) => setWorkerAddress(e.target.value)}
                     helperText="Stellar public key of the worker"
                   />
                   <Input
-                    label="Rate (XLM/second)"
+                    label="Total Amount (XLM)"
                     type="number"
-                    step="0.0001"
-                    placeholder="0.001"
-                    value={rate}
-                    onChange={(e) => setRate(e.target.value)}
-                    helperText="Wage accrual rate per second"
+                    step="0.0000001"
+                    min="0"
+                    placeholder="100"
+                    value={totalAmount}
+                    onChange={(e) => setTotalAmount(e.target.value)}
+                    helperText="Total XLM to stream to the worker over the duration"
                   />
-                  <Input
-                    label="Start Date"
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
-                  <Input
-                    label="End Date"
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input
+                      label="Hours"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="1"
+                      value={durationHours}
+                      onChange={(e) => setDurationHours(e.target.value)}
+                    />
+                    <Input
+                      label="Minutes"
+                      type="number"
+                      min="0"
+                      max="59"
+                      step="1"
+                      placeholder="0"
+                      value={durationMinutes}
+                      onChange={(e) => setDurationMinutes(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={startNow}
+                        onChange={(e) => setStartNow(e.target.checked)}
+                        className="h-4 w-4 accent-[var(--accent-teal)]"
+                      />
+                      Start streaming immediately
+                    </label>
+                    {!startNow && (
+                      <Input
+                        label="Start at"
+                        type="datetime-local"
+                        value={startAt}
+                        onChange={(e) => setStartAt(e.target.value)}
+                        helperText="Must be at least 10 seconds in the future"
+                      />
+                    )}
+                  </div>
+
+                  {/* Live preview of what will be submitted */}
+                  {previewDurationSec > 0 && previewTotal > 0 && (
+                    <div className="p-3 rounded-lg bg-[var(--primary-700)] text-xs text-[var(--text-tertiary)] space-y-1">
+                      <div>
+                        Streaming{" "}
+                        <span className="text-[var(--accent-teal)] font-medium">
+                          {previewTotal.toFixed(7)} XLM
+                        </span>{" "}
+                        over{" "}
+                        <span className="text-[var(--text-primary)]">
+                          {parseInt(durationHours || "0", 10)}h{" "}
+                          {parseInt(durationMinutes || "0", 10)}m
+                        </span>
+                      </div>
+                      <div>
+                        Rate:{" "}
+                        <span className="text-[var(--text-primary)] font-mono">
+                          {previewRatePerSec.toFixed(7)} XLM/sec
+                        </span>{" "}
+                        ({previewRatePerHour.toFixed(4)} XLM/hr)
+                      </div>
+                    </div>
+                  )}
+
                   <Button
                     type="submit"
                     variant="success"
                     fullWidth
                     loading={isSubmitting}
-                    disabled={!workerAddress || !rate || !startDate || !endDate || isSubmitting}
+                    disabled={
+                      !workerAddress ||
+                      !totalAmount ||
+                      previewDurationSec <= 0 ||
+                      isSubmitting
+                    }
                   >
                     Create Stream
                   </Button>
