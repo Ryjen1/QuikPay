@@ -3,16 +3,27 @@
  * ─────────────────
  * Frontend bindings for the PayrollVault Soroban contract.
  *
+ * The vault holds real XLM (custodied by the contract via the native XLM
+ * Stellar Asset Contract) and maintains a separate, per-employer balance.
+ * Each connected wallet has its own balance + liability inside the contract:
+ *
+ *   • deposit(from, amount)     – user signs; real XLM moves user → contract
+ *   • withdraw(employer, amount) – user signs; real XLM moves contract → user
+ *                                   (only available portion can be withdrawn)
+ *
  * Exports
  * ───────
  * • PAYROLL_VAULT_CONTRACT_ID   – contract address from env
- * • TokenVaultData              – shape of vault data for a token
- * • getVaultBalance             – reads total balance for a token
- * • getVaultLiability           – reads total liability for a token
- * • getVaultAvailableBalance    – reads available balance (balance - liability)
- * • getVaultData                – reads complete vault data for a token
- * • getAllVaultData             – reads vault data for all configured tokens
- * • getActualVaultBalance       – reads actual account balance from Horizon (NEW)
+ * • TokenVaultData              – shape of vault data for a token (per employer)
+ * • buildDepositTx              – build a Soroban deposit invocation
+ * • buildWithdrawTx             – build a Soroban withdraw invocation
+ * • getVaultBalance             – reads employer's balance (stroops)
+ * • getVaultLiability           – reads employer's liability (stroops)
+ * • getVaultAvailableBalance    – reads employer's available balance
+ * • getEmployerVaultData        – reads complete per-employer vault data
+ * • getAllVaultData             – reads vault data for a single employer
+ *                                 across the configured token list (XLM only
+ *                                 in the current contract)
  */
 
 import {
@@ -22,15 +33,8 @@ import {
   nativeToScVal,
   scValToNative,
   Address,
-  Operation,
-  Asset,
-  Horizon,
 } from "@stellar/stellar-sdk";
-import { rpcUrl, networkPassphrase, horizonUrl } from "./util";
-
-export const VAULT_ACCOUNT = (
-  import.meta.env.VITE_VAULT_ACCOUNT as string | undefined
-)?.trim() ?? "";
+import { rpcUrl, networkPassphrase } from "./util";
 
 // ─── Contract ID ──────────────────────────────────────────────────────────────
 
@@ -42,18 +46,18 @@ export const PAYROLL_VAULT_CONTRACT_ID: string =
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /**
- * Shape of vault data for a specific token as returned by the contract.
+ * Per-employer vault data for a specific token.
  */
 export interface TokenVaultData {
   /** Token contract address (or empty string for native XLM) */
   token: string;
   /** Token symbol (e.g., "XLM", "USDC") */
   tokenSymbol: string;
-  /** Total balance in stroops (smallest unit) */
+  /** Employer's deposited balance in stroops */
   balance: bigint;
-  /** Total liability (committed to streams) in stroops */
+  /** Employer's liability (committed to streams) in stroops */
   liability: bigint;
-  /** Available balance (balance - liability) in stroops */
+  /** Employer's available balance (balance - liability) in stroops */
   available: bigint;
   /** Monthly burn rate in stroops (estimated) */
   monthlyBurnRate: bigint;
@@ -67,23 +71,9 @@ function getRpcServer(): SorobanRpc.Server {
   return new SorobanRpc.Server(rpcUrl, { allowHttp: true });
 }
 
-function getHorizonServer(): Horizon.Server {
-  return new Horizon.Server(horizonUrl);
-}
-
 /**
- * Converts a token string to a ScVal suitable for the contract.
- * Empty string → native XLM address bytes.
- */
-function tokenToScVal(token: string): ReturnType<typeof nativeToScVal> {
-  if (!token || token === "native") {
-    return nativeToScVal(null, { type: "address" });
-  }
-  return new Address(token).toScVal();
-}
-
-/**
- * Simulates a read-only contract call.
+ * Simulates a read-only contract call, using `sourceAddress` as the source.
+ * Falls back to the contract address itself if the user account isn't on chain.
  */
 async function simulateContractRead<T>(
   sourceAddress: string,
@@ -118,101 +108,102 @@ async function simulateContractRead<T>(
 // ─── buildDepositTx ─────────────────────────────────────────────────────────
 
 /**
- * Builds a deposit transaction.
- * Sends XLM from user → vault G... account via classic payment.
- * This is separate from the contract call (which records accounting).
- *
- * Flow: User sends XLM via classic payment → vault account holds XLM.
- * The backend will later call contract.deposit() to record the accounting.
+ * Builds a `deposit(from, amount)` Soroban invocation. The user signs this
+ * transaction; on submission the vault contract transfers `amount` stroops of
+ * native XLM from `from` into the contract via the native XLM SAC, and
+ * credits the user's per-employer balance.
  */
 export async function buildDepositTx(
   fromAddress: string,
-  _token: string,
   amount: bigint,
 ): Promise<{ preparedXdr: string }> {
-  if (!VAULT_ACCOUNT) {
-    throw new Error("VITE_VAULT_ACCOUNT is not set.");
+  if (!PAYROLL_VAULT_CONTRACT_ID) {
+    throw new Error("VITE_PAYROLL_VAULT_CONTRACT_ID is not set.");
+  }
+  if (amount <= 0n) {
+    throw new Error("Deposit amount must be positive.");
   }
 
   const server = getRpcServer();
   const account = await server.getAccount(fromAddress);
+  const contract = new Contract(PAYROLL_VAULT_CONTRACT_ID);
 
-  // Convert stroops to XLM (divide by 10^7)
-  // Stellar SDK expects amount as XLM string, not stroops
-  const amountInXLM = (Number(amount) / 1e7).toFixed(7);
-
-  // Single classic payment operation only
-  // (Soroban prepareTransaction only allows one op per tx)
   const tx = new TransactionBuilder(account, {
-    fee: "200000",
+    fee: "1000000",
     networkPassphrase,
   })
     .addOperation(
-      Operation.payment({
-        destination: VAULT_ACCOUNT, // G... vault address
-        asset: Asset.native(),
-        amount: amountInXLM, // Must be XLM as decimal string
-        source: fromAddress,
-      }),
+      contract.call(
+        "deposit",
+        new Address(fromAddress).toScVal(),
+        nativeToScVal(amount, { type: "i128" }),
+      ),
     )
     .setTimeout(60)
     .build();
 
-  // Prepare without Soroban wrapping (classic tx)
-  return { preparedXdr: tx.toXDR() };
+  const prepared = await server.prepareTransaction(tx);
+  return { preparedXdr: prepared.toXDR() };
 }
 
-// ─── getActualVaultBalance ──────────────────────────────────────────────────
+// ─── buildWithdrawTx ────────────────────────────────────────────────────────
 
 /**
- * Gets the actual XLM balance of the vault account from Horizon.
- * This is a workaround until the backend service updates the contract.
- * 
- * @returns Balance in stroops (1 XLM = 10^7 stroops)
+ * Builds a `withdraw(employer, amount)` Soroban invocation. The user signs
+ * this transaction; on submission the vault transfers `amount` stroops of
+ * native XLM back from the contract to `employer` (must not exceed
+ * `balance - liability`).
  */
-export async function getActualVaultBalance(): Promise<bigint> {
-  if (!VAULT_ACCOUNT) {
-    return 0n;
+export async function buildWithdrawTx(
+  employerAddress: string,
+  amount: bigint,
+): Promise<{ preparedXdr: string }> {
+  if (!PAYROLL_VAULT_CONTRACT_ID) {
+    throw new Error("VITE_PAYROLL_VAULT_CONTRACT_ID is not set.");
+  }
+  if (amount <= 0n) {
+    throw new Error("Withdraw amount must be positive.");
   }
 
-  try {
-    const server = getHorizonServer();
-    const account = await server.loadAccount(VAULT_ACCOUNT);
-    
-    // Find XLM balance
-    const xlmBalance = account.balances.find(
-      (b) => b.asset_type === "native"
-    );
-    
-    if (!xlmBalance || xlmBalance.asset_type !== "native") {
-      return 0n;
-    }
-    
-    // Convert XLM to stroops
-    const balanceInStroops = BigInt(Math.floor(parseFloat(xlmBalance.balance) * 1e7));
-    return balanceInStroops;
-  } catch (error) {
-    console.error("Error fetching vault balance from Horizon:", error);
-    return 0n;
-  }
+  const server = getRpcServer();
+  const account = await server.getAccount(employerAddress);
+  const contract = new Contract(PAYROLL_VAULT_CONTRACT_ID);
+
+  const tx = new TransactionBuilder(account, {
+    fee: "1000000",
+    networkPassphrase,
+  })
+    .addOperation(
+      contract.call(
+        "withdraw",
+        new Address(employerAddress).toScVal(),
+        nativeToScVal(amount, { type: "i128" }),
+      ),
+    )
+    .setTimeout(60)
+    .build();
+
+  const prepared = await server.prepareTransaction(tx);
+  return { preparedXdr: prepared.toXDR() };
 }
 
 // ─── getVaultBalance ─────────────────────────────────────────────────────────
 
 /**
- * Calls `get_balance` on the PayrollVault contract to get the total balance
- * for a specific token.
+ * Calls `get_balance(employer)` on the PayrollVault contract.
  *
- * @param token Token contract address (or empty string for XLM)
- * @returns Balance in stroops, or null if error
+ * @param employer  Employer's Stellar account ID (G…)
+ * @returns Balance in stroops, or null on error
  */
-export async function getVaultBalance(token: string): Promise<bigint | null> {
-  if (!PAYROLL_VAULT_CONTRACT_ID) return null;
+export async function getVaultBalance(
+  employer: string,
+): Promise<bigint | null> {
+  if (!PAYROLL_VAULT_CONTRACT_ID || !employer) return null;
 
   const contract = new Contract(PAYROLL_VAULT_CONTRACT_ID);
   const balance = await simulateContractRead<bigint>(
-    PAYROLL_VAULT_CONTRACT_ID,
-    contract.call("get_balance", tokenToScVal(token)),
+    employer,
+    contract.call("get_balance", new Address(employer).toScVal()),
   );
 
   return balance;
@@ -221,19 +212,17 @@ export async function getVaultBalance(token: string): Promise<bigint | null> {
 // ─── getVaultLiability ───────────────────────────────────────────────────────
 
 /**
- * Calls `get_liability` on the PayrollVault contract to get the total liability
- * (amount committed to active streams) for a specific token.
- *
- * @param token Token contract address (or empty string for XLM)
- * @returns Liability in stroops, or null if error
+ * Calls `get_liability(employer)` on the PayrollVault contract.
  */
-export async function getVaultLiability(token: string): Promise<bigint | null> {
-  if (!PAYROLL_VAULT_CONTRACT_ID) return null;
+export async function getVaultLiability(
+  employer: string,
+): Promise<bigint | null> {
+  if (!PAYROLL_VAULT_CONTRACT_ID || !employer) return null;
 
   const contract = new Contract(PAYROLL_VAULT_CONTRACT_ID);
   const liability = await simulateContractRead<bigint>(
-    PAYROLL_VAULT_CONTRACT_ID,
-    contract.call("get_liability", tokenToScVal(token)),
+    employer,
+    contract.call("get_liability", new Address(employer).toScVal()),
   );
 
   return liability;
@@ -242,39 +231,36 @@ export async function getVaultLiability(token: string): Promise<bigint | null> {
 // ─── getVaultAvailableBalance ────────────────────────────────────────────────
 
 /**
- * Calculates available balance (balance - liability) for a token.
- *
- * @param token Token contract address (or empty string for XLM)
- * @returns Available balance in stroops, or null if error
+ * Calls `get_available(employer)` on the PayrollVault contract.
  */
 export async function getVaultAvailableBalance(
-  token: string,
+  employer: string,
 ): Promise<bigint | null> {
-  const balance = await getVaultBalance(token);
-  const liability = await getVaultLiability(token);
+  if (!PAYROLL_VAULT_CONTRACT_ID || !employer) return null;
 
-  if (balance === null || liability === null) return null;
+  const contract = new Contract(PAYROLL_VAULT_CONTRACT_ID);
+  const available = await simulateContractRead<bigint>(
+    employer,
+    contract.call("get_available", new Address(employer).toScVal()),
+  );
 
-  return balance - liability;
+  return available;
 }
 
-// ─── getVaultData ────────────────────────────────────────────────────────────
+// ─── getEmployerVaultData ────────────────────────────────────────────────────
 
 /**
- * Fetches complete vault data for a single token.
- *
- * @param token Token contract address (or empty string for XLM)
- * @param tokenSymbol Human-readable token symbol
- * @param monthlyBurnRate Estimated monthly burn rate in stroops
- * @returns Complete vault data or null if error
+ * Fetches complete vault data for a single employer + token.
+ * Only native XLM is currently held by the contract.
  */
-export async function getVaultData(
+export async function getEmployerVaultData(
+  employer: string,
   token: string,
   tokenSymbol: string,
   monthlyBurnRate: bigint,
 ): Promise<TokenVaultData | null> {
-  const balance = await getVaultBalance(token);
-  const liability = await getVaultLiability(token);
+  const balance = await getVaultBalance(employer);
+  const liability = await getVaultLiability(employer);
 
   if (balance === null || liability === null) return null;
 
@@ -298,39 +284,41 @@ export async function getVaultData(
 // ─── getAllVaultData ─────────────────────────────────────────────────────────
 
 /**
- * Fetches vault data for multiple tokens.
- * WORKAROUND: For XLM, reads actual balance from Horizon instead of contract.
- *
- * @param tokens Array of token configurations
- * @returns Array of vault data for each token
+ * Fetches per-employer vault data across a list of token configurations.
+ * The current contract only supports the asset it was initialized with
+ * (native XLM); non-native tokens return zero balances.
  */
 export async function getAllVaultData(
+  employer: string,
   tokens: Array<{
     token: string;
     tokenSymbol: string;
     monthlyBurnRate: bigint;
   }>,
 ): Promise<TokenVaultData[]> {
+  if (!employer) return [];
+
   const results = await Promise.all(
     tokens.map(async ({ token, tokenSymbol, monthlyBurnRate }) => {
-      // WORKAROUND: For XLM (empty token), read actual balance from Horizon
+      // Only XLM is held by the vault; other tokens return a zero entry
       if (!token || token === "" || token === "native") {
-        const actualBalance = await getActualVaultBalance();
-        return {
-          token: "",
-          tokenSymbol: "XLM",
-          balance: actualBalance,
-          liability: 0n,
-          available: actualBalance,
+        const data = await getEmployerVaultData(
+          employer,
+          "",
+          tokenSymbol || "XLM",
           monthlyBurnRate,
-          runwayDays: monthlyBurnRate > 0n
-            ? Number(actualBalance / (monthlyBurnRate / 30n))
-            : Infinity,
-        };
+        );
+        return data;
       }
-      
-      // For other tokens, use contract
-      return getVaultData(token, tokenSymbol, monthlyBurnRate);
+      return {
+        token,
+        tokenSymbol,
+        balance: 0n,
+        liability: 0n,
+        available: 0n,
+        monthlyBurnRate,
+        runwayDays: Infinity,
+      } satisfies TokenVaultData;
     }),
   );
 
